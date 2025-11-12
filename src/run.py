@@ -34,7 +34,7 @@ def main():
     elo.process_historical_games()
 
     cal_plot_path = os.path.join(args.out, "calibration.png") if args.plot_calibration else None
-    elo.run_backtesting_and_evaluation(out_dir="out")
+    elo.run_backtesting_and_evaluation(save_calibration_plots_to=cal_plot_path)
 
     # Save per-fixture predictions from backtest
     pred_csv = os.path.join(args.out, "fixture_predictions.csv")
