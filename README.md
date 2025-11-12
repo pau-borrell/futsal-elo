@@ -1,6 +1,6 @@
 # Futsal Match Prediction with Elo Ratings
 
-Python implementation of an Elo-based prediction model for FCF Futsal Barcelona League.
+Python implementation of an Elo-based prediction model for Federació Catalana de Futbol.
 Features:
 - Goal-difference and home-advantage adjusted Elo.
 - Logistic regression for data-driven draw probability.
