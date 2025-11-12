@@ -235,7 +235,7 @@ class EloSystem:
 
             h, a = r["HomeTeam"], r["AwayTeam"]
             h_elo, a_elo = temp[h], temp[a]
-            ph, pd, pa = self.calculate_outcome_probabilities(h_elo, a_elo)
+            ph, p_draw, pa = self.calculate_outcome_probabilities(h_elo, a_elo)
 
             # Actual result encoding
             if r["HomeGoals"] > r["AwayGoals"]:
@@ -252,7 +252,7 @@ class EloSystem:
                     "HomeEloBefore": h_elo,
                     "AwayEloBefore": a_elo,
                     "HomeWinProb": ph,
-                    "DrawProb": pd,
+                    "DrawProb": p_draw,
                     "AwayWinProb": pa,
                     "Actual": actual,
                 }
