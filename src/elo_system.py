@@ -205,10 +205,10 @@ class EloSystem:
             "away_team": away_team,
             "home_elo": h_elo,
             "away_elo": a_elo,
-            "probs": (ph, pd, pa),
+            "probs": (ph, p_draw, pa),
             "odds": (
                 self.calculate_odds(ph, overround),
-                self.calculate_odds(pd, overround),
+                self.calculate_odds(p_draw, overround),
                 self.calculate_odds(pa, overround),
             ),
         }
