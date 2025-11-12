@@ -199,7 +199,7 @@ class EloSystem:
         """
         h_elo = self.elo_ratings.get(home_team, self.initial_elo)
         a_elo = self.elo_ratings.get(away_team, self.initial_elo)
-        ph, pd, pa = self.calculate_outcome_probabilities(h_elo, a_elo)
+        ph, p_draw, pa = self.calculate_outcome_probabilities(h_elo, a_elo)
         return {
             "home_team": home_team,
             "away_team": away_team,
@@ -273,7 +273,7 @@ class EloSystem:
             h_elo, a_elo = temp[h], temp[a]
 
             # Predict before seeing the result
-            ph, pd, pa = self.calculate_outcome_probabilities(h_elo, a_elo)
+            ph, p_draw, pa = self.calculate_outcome_probabilities(h_elo, a_elo)
 
             # Encode actual result
             if r["HomeGoals"] > r["AwayGoals"]:
@@ -290,7 +290,7 @@ class EloSystem:
                     "HomeEloBefore": h_elo,
                     "AwayEloBefore": a_elo,
                     "HomeWinProb": ph,
-                    "DrawProb": pd,
+                    "DrawProb": p_draw,
                     "AwayWinProb": pa,
                     "Actual": actual,
                 }
