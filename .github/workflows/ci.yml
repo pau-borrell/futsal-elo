@@ -1,0 +1,25 @@
+name: Quality checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    env:
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+      - run: python src/run.py --data data/FCF_Futsal_BCN_Gr10_2025_26_DB.xlsx --out out --plot-calibration
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-python-${{ matrix.python }}
+          path: out/

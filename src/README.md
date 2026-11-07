@@ -1,5 +1,3 @@
-This folder contains all Python source code files.
+# Source
 
-Main files:
-- elo_system.py → main Elo rating class.
-- run.py → command-line script to train, test, and evaluate the model.
+elo_system.py implements validation, ratings, forecasting and chronological evaluation. run.py provides the reproducible CLI. Run commands from the repository root; see the main README for usage.
