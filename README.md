@@ -42,7 +42,19 @@ All matches with the same Date value are forecast before incorporating any of th
 
 ## Evaluation and results
 
-The CLI prints and saves actual computed results; this README deliberately contains no unverified performance numbers. Earlier versions fitted the draw estimator on the full dataset before backtesting. Those historical scores should be recomputed with this version before being quoted.
+Verified on the bundled snapshot: **116 completed matches**, with date-batched walk-forward evaluation.
+
+| Result | Value |
+|---|---:|
+| Elo + draw model log loss | 0.9785 |
+| Historical-frequency baseline log loss | 1.0316 |
+| Uniform baseline log loss | 1.0986 |
+| Multiclass Brier score | 0.5732 |
+| Accuracy | 50.9% |
+
+This is a 5.1% relative log-loss reduction versus the historical-frequency baseline on this snapshot, not evidence of statistical significance or performance on another league. [Reproduction run and output artifacts](https://github.com/pau-borrell/futsal-elo/actions/runs/42406798612).
+
+Earlier versions fitted the draw estimator on the full dataset before backtesting. Their historical scores are superseded by this evaluation.
 
 | Metric | Interpretation |
 |---|---|
@@ -86,6 +98,6 @@ Tests cover temporal leakage, same-date isolation, probability normalization, ra
 
 This is a historical amateur-league snapshot, not a live data feed. Small samples, postponed fixtures, changing squads and division strength limit generalization. Hyperparameters are defaults, not claimed to be optimal. The Elo expected score is used as a conditional non-draw win share, which needs empirical calibration.
 
-Useful next experiments are held-out-season evaluation, nested chronological tuning, bootstrap uncertainty with temporal blocks, a Poisson goal-model baseline and sensitivity analysis for home advantage and draw priors. Demonstrating improvement over the historical-frequency baseline requires rerunning and inspecting the generated metrics.
+Useful next experiments are held-out-season evaluation, nested chronological tuning, bootstrap uncertainty with temporal blocks, a Poisson goal-model baseline and sensitivity analysis for home advantage and draw priors. The snapshot result above should be checked on additional seasons before claiming generalization.
 
 MIT license for code. Match-data rights remain with their original source; see the data documentation.
