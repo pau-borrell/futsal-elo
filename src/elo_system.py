@@ -78,6 +78,8 @@ class EloSystem:
             raise ValueError("Duplicate fixture found.")
         # Stable ordering; evaluation freezes all information within each date.
         df = df.sort_values("Date", kind="stable").reset_index(drop=True)
+        self.backtest_results_df = None
+        self.draw_model = None
         self.played_games_df = df
         return df
 
