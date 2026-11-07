@@ -1,5 +1,3 @@
-This folder will contain generated files after running the model:
-- fixture_predictions.csv
-- plots and metrics
+# Generated artifacts
 
-It starts empty and is created automatically when running `run.py`.
+Run the CLI from the project root. This directory receives predictions, rankings, metrics, a run manifest and plots. Generated outputs are ignored by git; CI retains them as downloadable workflow artifacts.

@@ -37,15 +37,47 @@ class EloSystem:
         self.evaluation_metrics: Dict[str, float] = {}
         self.elo_history_df: pd.DataFrame | None = None
         self.random_state = int(random_state)
-        np.random.seed(self.random_state)
+        if not 0 <= self.reversion_percentage <= 1:
+            raise ValueError("reversion_percentage must be between 0 and 1.")
+        if self.k_factor <= 0 or not np.isfinite([
+            self.initial_elo, self.k_factor, self.home_advantage
+        ]).all():
+            raise ValueError("Elo parameters must be finite and k_factor positive.")
 
     def load_and_prepare_data(self, file_path: str) -> pd.DataFrame:
-        df = pd.read_excel(file_path)
+        df = (pd.read_csv(file_path) if str(file_path).lower().endswith(".csv")
+              else pd.read_excel(file_path))
+        required = {"HomeTeam", "AwayTeam", "HomeGoals", "AwayGoals", "Date"}
+        missing = required - set(df.columns)
+        if missing:
+            raise ValueError(f"Missing required columns: {sorted(missing)}")
+        # Unplayed fixtures have both scores missing; partial scores are errors.
+        partial = df[["HomeGoals", "AwayGoals"]].isna().sum(axis=1) == 1
+        if partial.any():
+            raise ValueError("Fixtures must have both scores or neither.")
         df = df.dropna(subset=["HomeGoals", "AwayGoals"]).copy()
-        df["HomeGoals"] = df["HomeGoals"].astype(int)
-        df["AwayGoals"] = df["AwayGoals"].astype(int)
-        sort_cols = [c for c in ["Season", "Date", "Jornada"] if c in df.columns]
-        df = df.sort_values(by=sort_cols if sort_cols else ["Date"]).reset_index(drop=True)
+        if df.empty:
+            raise ValueError("No completed matches found.")
+        for col in ["HomeTeam", "AwayTeam"]:
+            if df[col].isna().any() or df[col].astype(str).str.strip().eq("").any():
+                raise ValueError("Team names cannot be empty.")
+            df[col] = df[col].astype(str).str.strip()
+        if df["HomeTeam"].eq(df["AwayTeam"]).any():
+            raise ValueError("A team cannot play itself.")
+        for col in ["HomeGoals", "AwayGoals"]:
+            values = pd.to_numeric(df[col], errors="raise")
+            if not np.isfinite(values).all() or (values < 0).any() or (values % 1 != 0).any():
+                raise ValueError("Goals must be finite non-negative integers.")
+            df[col] = values.astype(int)
+        df["Date"] = pd.to_datetime(df["Date"], errors="raise")
+        if df["Date"].isna().any():
+            raise ValueError("Completed matches require a date.")
+        if "Season" in df and df["Season"].isna().any():
+            raise ValueError("Season cannot be missing when supplied.")
+        if df.duplicated(["Date", "HomeTeam", "AwayTeam"]).any():
+            raise ValueError("Duplicate fixture found.")
+        # Stable ordering; evaluation freezes all information within each date.
+        df = df.sort_values("Date", kind="stable").reset_index(drop=True)
         self.played_games_df = df
         return df
 
@@ -70,12 +102,12 @@ class EloSystem:
         if home_goals > away_goals:
             outcome = 1.0
             factor = np.log(abs(home_goals - away_goals) + 1.0) * (
-                2.2 / (((home_elo + self.home_advantage) - away_elo) * 0.001 + 2.2)
+                2.2 / max(0.5, ((home_elo + self.home_advantage) - away_elo) * 0.001 + 2.2)
             )
         elif away_goals > home_goals:
             outcome = 0.0
             factor = np.log(abs(home_goals - away_goals) + 1.0) * (
-                2.2 / (((away_elo) - (home_elo + self.home_advantage)) * 0.001 + 2.2)
+                2.2 / max(0.5, (away_elo - (home_elo + self.home_advantage)) * 0.001 + 2.2)
             )
         else:
             outcome = 0.5
@@ -88,6 +120,7 @@ class EloSystem:
             raise ValueError("No data loaded. Call load_and_prepare_data first.")
         temp_ratings = {t: self.initial_elo for t in self.elo_ratings}
         diffs: list[float] = []
+        self.initialize_teams(self.played_games_df)
         prev_season = None
         for _, r in self.played_games_df.iterrows():
             if prev_season is not None and "Season" in r and r["Season"] != prev_season:
@@ -99,10 +132,17 @@ class EloSystem:
             uh, ua = self.update_elo(h_elo, a_elo, int(r["HomeGoals"]), int(r["AwayGoals"]))
             temp_ratings[h], temp_ratings[a] = uh, ua
             prev_season = r["Season"] if "Season" in r else prev_season
+        if self.backtest_results_df is not None:
+            # Match date-batched pre-match features used during evaluation.
+            diffs = (self.backtest_results_df["HomeEloBefore"]
+                     - self.backtest_results_df["AwayEloBefore"]).abs().tolist()
         X = np.array(diffs).reshape(-1, 1)
         y = (self.played_games_df["HomeGoals"] == self.played_games_df["AwayGoals"]).astype(int).to_numpy()
         self.draw_model = LogisticRegression(solver="liblinear", random_state=self.random_state)
-        self.draw_model.fit(X, y)
+        if len(np.unique(y)) < 2:
+            self.draw_model = None
+        else:
+            self.draw_model.fit(X, y)
 
     def _predict_draw_probability(self, elo_diff: float) -> float:
         if self.draw_model is None:
@@ -122,6 +162,8 @@ class EloSystem:
         return p_home / s, p_draw / s, p_away / s
 
     def calculate_odds(self, p: float, overround: float = 0.20) -> float | None:
+        if not np.isfinite(overround) or overround < 0:
+            raise ValueError("overround must be finite and non-negative.")
         if p <= 0.0 or p >= 1.0:
             return None
         return 1.0 / (p * (1.0 + overround))
@@ -132,7 +174,12 @@ class EloSystem:
         away_team: str,
         overround: float = 0.20
     ) -> Dict[str, object]:
-        h_elo = self.elo_ratings.get(home_team, self.initial_elo)
+        if home_team == away_team:
+            raise ValueError("Choose two different teams.")
+        unknown = {home_team, away_team} - self.elo_ratings.keys()
+        if unknown:
+            raise ValueError(f"Unknown teams: {sorted(unknown)}")
+        h_elo = self.elo_ratings[home_team]
         a_elo = self.elo_ratings.get(away_team, self.initial_elo)
         ph, p_draw, pa = self.calculate_outcome_probabilities(h_elo, a_elo)
         return {
@@ -153,6 +200,7 @@ class EloSystem:
             raise ValueError("No data loaded. Call load_and_prepare_data first.")
         if not self.elo_ratings:
             raise ValueError("Teams not initialized. Call initialize_teams first.")
+        self.initialize_teams(self.played_games_df)
         prev_season = None
         for _, r in self.played_games_df.iterrows():
             if prev_season is not None and "Season" in r and r["Season"] != prev_season:
@@ -173,8 +221,26 @@ class EloSystem:
             raise ValueError("No data loaded. Call load_and_prepare_data first.")
         if not self.elo_ratings:
             raise ValueError("Teams not initialized. Call initialize_teams first.")
-        if self.draw_model is None:
-            self.train_draw_model()
+        # Never reuse a draw model trained on the full dataset in evaluation.
+        self.draw_model = None
+        past_features, past_draws = [], []
+        outcome_counts = np.ones(3)
+        active_date = None
+        pending = []
+        baseline_predictions = []
+
+        def learn_pending():
+            for h, a, hg, ag, feature, outcome in pending:
+                temp[h], temp[a] = self.update_elo(temp[h], temp[a], hg, ag)
+                past_features.append([feature])
+                past_draws.append(int(hg == ag))
+                outcome_counts[outcome] += 1
+            pending.clear()
+            self.draw_model = None
+            if len(past_draws) >= 20 and len(set(past_draws)) == 2:
+                self.draw_model = LogisticRegression(
+                    solver="liblinear", random_state=self.random_state
+                ).fit(past_features, past_draws)
         temp = {t: self.initial_elo for t in self.elo_ratings}
         prev_season = None
         rows = []
@@ -183,6 +249,9 @@ class EloSystem:
         for t, v in temp.items():
             hist.append({"Step": step, "Team": t, "Elo": v})
         for _, r in self.played_games_df.iterrows():
+            if r["Date"] != active_date:
+                learn_pending()
+                active_date = r["Date"]
             if prev_season is not None and "Season" in r and r["Season"] != prev_season:
                 for t in temp:
                     temp[t] = (1 - self.reversion_percentage) * temp[t] + self.reversion_percentage * self.initial_elo
@@ -197,6 +266,7 @@ class EloSystem:
                 actual = 0.5
             rows.append(
                 {
+                    "Date": r["Date"].isoformat(),
                     "HomeTeam": h,
                     "AwayTeam": a,
                     "HomeEloBefore": h_elo,
@@ -207,12 +277,16 @@ class EloSystem:
                     "Actual": actual,
                 }
             )
+            baseline_predictions.append(outcome_counts / outcome_counts.sum())
+            pending.append((h, a, int(r["HomeGoals"]), int(r["AwayGoals"]),
+                            abs(h_elo - a_elo), {0.0: 0, 0.5: 1, 1.0: 2}[actual]))
             uh, ua = self.update_elo(h_elo, a_elo, int(r["HomeGoals"]), int(r["AwayGoals"]))
-            temp[h], temp[a] = uh, ua
             step += 1
             hist.append({"Step": step, "Team": h, "Elo": uh})
             hist.append({"Step": step, "Team": a, "Elo": ua})
             prev_season = r["Season"] if "Season" in r else prev_season
+        learn_pending()
+        self.elo_ratings = temp.copy()
         df = pd.DataFrame(rows)
         self.backtest_results_df = df
         self.elo_history_df = pd.DataFrame(hist)
@@ -228,6 +302,11 @@ class EloSystem:
         y_pred = y_pred / y_pred.sum(axis=1, keepdims=True)
         ll = log_loss(y_true, y_pred, labels=[0, 1, 2])
         self.evaluation_metrics = {
+            "n_matches": len(df),
+            "baseline_logloss": float(log_loss(y_true, baseline_predictions, labels=[0, 1, 2])),
+            "uniform_logloss": float(np.log(3)),
+            "brier_multiclass": float(brier_home + brier_draw + brier_away),
+            "accuracy": float(np.mean(y_pred.argmax(axis=1) == y_true)),
             "brier_home": float(brier_home),
             "brier_draw": float(brier_draw),
             "brier_away": float(brier_away),
@@ -236,10 +315,9 @@ class EloSystem:
         if save_calibration_plots_to is not None:
             plt.figure(figsize=(14, 4))
             def _cal(ax, y_true_bin, y_prob, title):
-                try:
-                    prob_pred, frac_pos = calibration_curve(y_true_bin, y_prob, n_bins=n_bins, strategy="uniform")
-                except Exception:
-                    prob_pred, frac_pos = np.array([0.0, 1.0]), np.array([0.0, 1.0])
+                frac_pos, prob_pred = calibration_curve(
+                    y_true_bin, y_prob, n_bins=n_bins, strategy="uniform"
+                )
                 ax.plot([0, 1], [0, 1], "k:", label="perfect")
                 ax.plot(prob_pred, frac_pos, "o-", label=title)
                 ax.set_title(title)
